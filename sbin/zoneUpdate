@@ -1,0 +1,53 @@
+#!/bin/bash
+base="/var/cache/bind"
+zoneFiles="db"
+bindTools="/usr/sbin"
+
+user="bind"
+
+zone="${1}"
+
+serial=`date -u "+%Y%m%d00"`
+
+function checkFiles {
+  if ! "${bindTools}/rndc" status > /dev/null; then
+    return 1
+  fi
+
+  if [ "${zone}" = "" ]; then
+    echo "no zone has been specified"
+    return 1
+  fi
+
+  if [ ! -f "${base}/${zoneFiles}/${zone}.db" ]; then
+    echo "ZoneFile not found: ${base}/${zoneFiles}/${zone}.db"
+    return 1
+  fi
+}
+
+function updateSerial {
+  local zoneFile="${base}/${zoneFiles}/${zone}.db"
+  local current=`"${bindTools}/rndc" zonestatus "${zone}". | awk '/^serial:\s\S+/{ print $2 }'` || return 1
+
+  [ -f "${zoneFile}" ] || return 1
+
+  if [ "${serial}" -le "${current}" ]; then
+    newSerial=$(( current + 1 ))
+  else
+    newSerial="${serial}"
+  fi
+
+  local seriaInlFile=`"${bindTools}/named-checkzone" "${zone}" "${zoneFile}" | egrep -ho '[0-9]{10}'` || return 1
+  sed -i 's/'${serialInFile}'/'${newSerial}'/' "${zoneFile}"
+  return 0
+}
+
+function main {
+  zone=`echo "${zone}" | sed 's/\.$//'`
+  checkFiles || return 1;
+  chown "${user}" "${base}/${zoneFiles}/${zone}.db"
+  "${bindTools}/rndc" freeze "${zone}."
+  updateSerial
+  "${bindTools}/rndc" thaw "${zone}."
+}
+main

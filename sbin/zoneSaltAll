@@ -1,0 +1,8 @@
+#!/bin/bash
+policyFile="/etc/dnssec-policy.conf"
+bindTools="/usr/sbin"
+
+for zone in `awk '/\s*+zone\s+\S+/{ print $2 }' "${policyFile}"`; do
+  echo "quing resalt for zone ${zone}"
+  "${bindTools}/rndc" signing -nsec3param 1 0 10 $(head -c 300 /dev/urandom | sha1sum | cut -b 1-16) "${zone}"
+done

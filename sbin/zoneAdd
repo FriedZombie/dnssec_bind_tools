@@ -1,0 +1,142 @@
+#!/bin/bash
+base="/var/cache/bind"
+
+dssetLocation="/root"
+
+confFile="/etc/bind/named.conf.local"
+policyFile="/etc/dnssec-policy.conf"
+
+zoneFiles="db"
+keys="keys"
+
+zone="$1"
+
+user="bind"
+
+bindTools="/usr/sbin"
+
+kskSize="2048"
+zskSize="2048"
+kskAlg="RSASHA512"
+zskAlg="RSASHA512"
+
+slaveIps=("95.216.200.78")
+remoteUser="root"
+
+function addZone {
+echo "
+zone \"${zone}\" IN {
+        type master;
+        file \"${zoneFiles}/${zone}.db\";
+
+        key-directory \"${keys}/${zone}\";
+        inline-signing yes;
+        auto-dnssec maintain;
+        serial-update-method date;
+        dnssec-dnskey-kskonly yes;
+
+        allow-transfer {
+          key "signed_comms.";
+        };
+
+        update-policy {
+          grant acme.key. name _acme-challenge.${zone}. txt;
+        };
+        notify yes;
+};" >> "/etc/bind/named.conf.local"
+}
+
+function addSlave {
+  local slave="
+zone \"${zone}\" IN {
+        type slave;
+        file \"${zone}.slave.db\";
+
+        allow-transfer {
+          none;
+        };
+        notify no;
+        masters {
+          116.202.29.57;
+          2a01:4f8:c010:2940::1;
+        };
+};"
+  for ip in "${slaveIps[@]}"; do
+    echo "${slave}" |ssh "${remoteUser}@${ip}" "cat >> \"${confFile}\"; \"${bindTools}/rndc\" reload && echo \"bind reloaded on \$(hostname)\" || echo \"failed to reload bind on \$(hostname)\""
+  done
+}
+
+function checkFiles {
+  if ! "${bindTools}/rndc" status > /dev/null; then
+    return 1
+  fi
+
+  if [ "${zone}" = "" ]; then
+    echo "no zone has been specified"
+    return 1
+  fi
+
+  if [ ! -f "${confFile}" ]; then
+    echo "Config file not found"
+    return 1
+  fi
+
+  if "${bindTools}/rndc" zonestatus "${zone}" > /dev/null 2>&1; then
+    echo "zone exists"
+    exit 1
+  else
+    if grep -i "zone.*${zone}" "${confFile}" > /dev/null 2>&1; then
+      echo "zone exists, but not found with rndc"
+      return 1
+    fi
+  fi
+
+  if [ ! -f "${base}/${zoneFiles}/${zone}.db" ]; then
+    echo "ZoneFile not found: ${base}/${zoneFiles}/${zone}.db"
+    return 1
+  fi
+  return 0
+}
+
+function createKeys {
+  if [ "$(ls -1 "${base}/${keys}/${zone}/"*.key 2>/dev/null| wc -l)" -lt "2" ]; then
+    mkdir -p "${base}/${keys}/${zone}"
+    rm "${base}/${keys}/${zone}/*" 2> /dev/null
+    zskKey="$("${bindTools}/dnssec-keygen" -K "${base}/${keys}/${zone}" -3 -a "${zskAlg}" -b "${zskSize}" "${zone}")"
+    kskKey="$("${bindTools}/dnssec-keygen" -K "${base}/${keys}/${zone}" -3 -f KSK -a "${kskAlg}" -b "${kskSize}" "${zone}")"
+    chown -R "${user}" "${base}/${keys}/${zone}"*
+    "${bindTools}/dnssec-dsfromkey" "${base}/${keys}/${zone}/${kskKey}" > "${dssetLocation}/dsset-${zone}."
+    echo "${dssetLocation}/dsset-${zone} and keys created"
+  else
+    echo "keys for zone ${zone} are already present, no dsset or keys created"
+  fi
+}
+
+function policyAdd {
+  if ! grep "zone.*${zone}" "${policyFile}" > /dev/null 2>&1; then
+    echo "
+zone ${zone} {
+    policy default-dnssec;
+    directory \"${base}/${keys}/${zone}\";
+};" >> "${policyFile}"
+    echo "zone added to dnssec policy"
+  else
+    echo "Zone allready in dnssec policy"
+  fi
+}
+
+function main {
+  zone=`echo "${zone}" | sed 's/\.$//'`
+  checkFiles || return 1
+  chown "${user}" "${base}/${zoneFiles}/${zone}.db"
+  createKeys
+  addSlave
+  addZone
+  "${bindTools}/rndc" reload || return 1
+  policyAdd
+  #add salt
+  sleep 10
+  "${bindTools}/rndc" signing -nsec3param 1 0 10 $(head -c 300 /dev/urandom | sha1sum | cut -b 1-16) "${zone}" || return 1
+}
+
+main
