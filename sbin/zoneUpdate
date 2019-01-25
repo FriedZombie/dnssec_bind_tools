@@ -37,7 +37,7 @@ function updateSerial {
     newSerial="${serial}"
   fi
 
-  local seriaInlFile=`"${bindTools}/named-checkzone" "${zone}" "${zoneFile}" | egrep -ho '[0-9]{10}'` || return 1
+  local serialInFile=`"${bindTools}/named-checkzone" "${zone}" "${zoneFile}" | egrep -ho '[0-9]{10}'` || return 1
   sed -i 's/'${serialInFile}'/'${newSerial}'/' "${zoneFile}"
   return 0
 }
