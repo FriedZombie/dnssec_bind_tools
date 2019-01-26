@@ -1,0 +1,225 @@
+#!/usr/bin/python3
+import configparser
+import json
+import requests
+import re
+import time
+import hashlib
+from pathlib import Path
+from datetime import datetime
+
+def checkError(r, d=''):
+  if 'error' in r:
+    if d:
+      d = 'Api error on ' + d + ': '
+    if 'message' in r['error']:
+      print( d+r['error']['message'] )
+    else:
+      print( d+'unkown error occured' )
+    return 1
+  return 0
+
+def checkUser(c):
+  loadSettings = [ 'password' ]
+  for k in loadSettings:
+    if k not in c:
+      print( 'Setting ' + k +' not defined for user ' + c['user'])
+      return 0
+  return 1
+
+def getKeyDirs(s):
+  regZone = re.compile('\s*zone\s+(?P<zone>\S+?)\.\s*{.*?};', flags=re.DOTALL|re.MULTILINE)
+  regDir  = re.compile('^\s*directory\s+(\'|\")(?P<dir>.+?)(\'|\")\s*;\s*$', flags=re.MULTILINE)
+  f = Path(s['policyFile'])
+
+  zoneKeyDirs = {}
+
+  if not f.is_file():
+    print ( 'Policy file not found: ' + s['policyFile'] )
+    return
+
+  contents = f.read_text()
+  if not contents:
+    print ('failed to read policy file:' + s['policyFile'])
+
+  for z in re.finditer(regZone, contents):
+    dir = regDir.search(z.group(0))
+    if not dir:
+      dir = s['keyDir']
+    else:
+      dir = dir.group('dir')
+    zoneKeyDirs[z.group('zone')] = dir
+
+  return zoneKeyDirs
+
+def metaSearch(contents):
+  mustHave = ['Created', 'Publish', 'Activate']
+  regMeta = re.compile('^\s*;.*?\s+(?P<key>\S+?):\s+(?P<time>\+?\d+)', flags=re.MULTILINE)
+
+  meta = {}
+  for m in re.finditer(regMeta, contents):
+    meta[m.group('key')] = m.group('time')
+  for h in mustHave:
+    if h not in meta:
+      return
+
+  meta['Created'] = int(meta['Created'])
+
+  for k, v in meta.items():
+    if k == 'Created':
+      continue
+    if v[:1] == '+':
+      v = int(v[1:]) + meta['Created']
+    else:
+      v = int(v)
+    meta[k] = v
+    return meta
+
+
+def getKeys(u, domain, dir):
+  ts = int(time.time())
+  p = Path(dir)
+  pub = []
+  if not p.is_dir():
+    print('Directory for ' + domain + ': not found: ' + dir)
+    return
+
+  if not 'flags' in u:
+    pubFlags = [257]
+  else:
+    pubFlags = json.loads(u['flags'])
+    for k, v in pubFlags:
+      pubFlags[k] = int(v)
+
+  regKey = re.compile('^\s*(?P<domain>\S+?)\.\s+IN\s+DNSKEY\s+(?P<flags>\d+)\s+(?P<nsec>\d+)\s+(?P<algorithm>\d+)\s+(?P<key>\S.*\S)\s', flags=re.MULTILINE)
+  regId = re.compile('^\s*;.*?keyid\s+(?P<id>\d+).+?for\s+(?P<domain>\S+?)\.\s', flags=re.MULTILINE)
+
+  for k in p.glob('K' + domain + '*.key'):
+    if k.is_file():
+      contents = k.read_text()
+      if not contents:
+        print ('failed to read key file for ' + domain + ':' + ' file: ' + k.as_posix())
+        return
+
+      keySearch = regKey.search(contents)
+      if keySearch and not int(keySearch.group('flags')) in pubFlags:
+        continue
+      idSearch = regId.search(contents)
+      meta = metaSearch(contents)
+
+      if not idSearch or not keySearch or not meta or idSearch.group('domain') != domain or keySearch.group('domain') != domain:
+        print('failed to parse key file for ' + domain + ' file: ' + k.as_posix())
+        return
+      if meta['Publish'] >= ts and not ('Delete' in meta and meta['Delete'] > ts):
+        pub.append({
+          'keytag'     : int( idSearch.group('id') ),
+          'flags'      : int( keySearch.group('flags') ),
+          'algorithm'  : int( keySearch.group('algorithm') ),
+          'public_key' : keySearch.group('key')
+        })
+  return pub
+
+def hashesStore(path,rw,store=[]):
+  f = Path(path)
+  if rw == 'r':
+    if not f.is_file():
+      print ('no cache file found: ' + path)
+      return {}
+    contents = f.read_text()
+    if not contents:
+      return {}
+    contents = json.loads(contents)
+    return contents
+  elif rw == 'w':
+    contents = json.dumps(store, sort_keys=True, indent=4, separators=(',', ': '))
+    f.write_text(contents)
+    return
+
+def checkNew(hash, domain, dHashes):
+  if not (domain in dHashes and dHashes[domain] == hash):
+    print('Updating domain: ' + domain)
+    return 1
+  return 0
+
+def main():
+  configFile = '/etc/versio.conf'
+  loadSettings = ['api', 'policyFile', 'keyDir', 'cacheFile']
+
+  strq = re.compile('(^\s*("|\')?)(?P<value>.+?)(("|\')?\s*$)')
+
+  configs = configparser.ConfigParser()
+  configs.read(configFile)
+
+  if not 'settings' in configs:
+    print('No settings found in: ' + configFile)
+    return
+
+  s = configs['settings'];
+  for k, v in s.items():
+    s[k] = strq.match(v).group('value')
+  for k in loadSettings:
+    if k not in s:
+      print( 'Setting ' + k +' not defined')
+      return
+
+  headers = {
+    'User-Agent'  : 'Frieds client',
+    'Content-Type': 'application/json',
+    'Accept'      : 'application/json'
+  }
+
+  dHashes = hashesStore(s['cacheFile'],'r')
+
+  zoneKeyDirs = getKeyDirs(s)
+  if not zoneKeyDirs:
+    print( 'No zone key locations where loaded' )
+    return
+
+  for u in configs.sections():
+    if u == 'settings':
+      continue
+
+    if 'user' not in configs[u]:
+      configs[u]['user'] = u
+    u = configs[u]
+    if not checkUser(u):
+      continue
+
+    for k, v in u.items():
+      u[k] = strq.match(v).group('value')
+
+    session=requests.Session()
+    session.auth = (u['user'], u['password'])
+    session.headers.update(headers)
+    resp = json.loads(session.get(s['api'] + '/domains?status=OK').text)
+
+    if checkError(resp):
+      continue
+
+    if 'DomainsList' not in resp or not resp['DomainsList']:
+      print('no domains found for ' + u['user'])
+      continue
+    rDomains = resp['DomainsList']
+
+    for rInfo in rDomains:
+      if 'domain' not in rInfo or not rInfo['domain']:
+        print('Unkown domain error occured')
+        continue
+      domain = rInfo['domain']
+      if domain in zoneKeyDirs:
+        pubKeys = getKeys(u, domain, zoneKeyDirs[domain])
+        if not pubKeys:
+          continue
+        data = json.dumps({ 'dnssec_keys': pubKeys })
+        updateHash = hashlib.md5(str(data).encode('utf-8')).hexdigest()
+        if not checkNew(updateHash, domain, dHashes):
+          continue
+        resp = json.loads(session.post(s['api'] + '/domains/' + domain + '/update', data=data).text)
+        if checkError(resp, domain):
+          continue
+        if not 'domainInfo' in resp:
+          print('Unexpected api response while updating: ' + domain)
+          continue
+        dHashes[domain] = updateHash
+        hashesStore(s['cacheFile'],'w', dHashes)
+main()
