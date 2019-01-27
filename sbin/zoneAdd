@@ -113,9 +113,9 @@ function createKeys {
 }
 
 function policyAdd {
-  if ! grep "zone.*${zone}" "${policyFile}" > /dev/null 2>&1; then
+  if ! grep "zone\s*${zone}" "${policyFile}" > /dev/null 2>&1; then
     echo "
-zone ${zone} {
+zone ${zone}. {
     policy default-dnssec;
     directory \"${base}/${keys}/${zone}\";
 };" >> "${policyFile}"
