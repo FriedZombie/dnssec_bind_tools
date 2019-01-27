@@ -28,7 +28,7 @@ def checkUser(c):
   return 1
 
 def getKeyDirs(s):
-  regZone = re.compile('\s*zone\s+(?P<zone>\S+?)\.\s*{.*?};', flags=re.DOTALL|re.MULTILINE)
+  regZone = re.compile('\s*zone\s+(?P<zone>\S+?)\.?\s*{.*?};', flags=re.DOTALL|re.MULTILINE)
   regDir  = re.compile('^\s*directory\s+(\'|\")(?P<dir>.+?)(\'|\")\s*;\s*$', flags=re.MULTILINE)
   f = Path(s['policyFile'])
 
