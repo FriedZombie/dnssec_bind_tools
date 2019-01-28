@@ -40,7 +40,7 @@ zone \"${zone}\" IN {
         };
 
         update-policy {
-          grant acme.key. name _acme-challenge.${zone}. txt;
+          grant acme.key. wildcard *.${zone}. txt;
         };
         notify yes;
 };" >> "/etc/bind/named.conf.local"
