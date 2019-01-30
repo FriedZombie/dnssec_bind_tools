@@ -210,7 +210,7 @@ def main():
         if not pubKeys:
           continue
         data = json.dumps({ 'dnssec_keys': pubKeys })
-        updateHash = hashlib.md5(str(data).encode('utf-8')).hexdigest()
+        updateHash = hashlib.sha1(str(data).encode('utf-8')).hexdigest()
         if not checkNew(updateHash, domain, dHashes):
           continue
         resp = json.loads(session.post(s['api'] + '/domains/' + domain + '/update', data=data).text)
