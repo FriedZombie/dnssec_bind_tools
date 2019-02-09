@@ -40,6 +40,7 @@ zone \"${zone}\" IN {
 
         update-policy {
           grant acme.key. wildcard *.${zone}. txt;
+          grant acme.key. wildcard *.${zone}. tlsa;
         };
         notify yes;
 };" >> "/etc/bind/named.conf.local"
