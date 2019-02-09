@@ -136,7 +136,7 @@ function main {
   policyAdd
   #add salt
   sleep 10
-  "${bindTools}/rndc" signing -nsec3param 1 0 10 $(head -c 300 /dev/urandom | sha1sum | cut -b 1-16) "${zone}" || return 1
+  "${bindTools}/rndc" signing -nsec3param 1 0 10 $(head -c 300 /dev/random | sha1sum | cut -b 1-16) "${zone}" || return 1
 }
 
 main
