@@ -33,7 +33,6 @@ zone \"${zone}\" IN {
         inline-signing yes;
         auto-dnssec maintain;
         serial-update-method date;
-        dnssec-dnskey-kskonly yes;
 
         allow-transfer {
           key "signed_comms.";
