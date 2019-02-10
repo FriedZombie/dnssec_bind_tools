@@ -113,7 +113,7 @@ def getKeys(u, domain, dir):
       if not idSearch or not keySearch or not meta or idSearch.group('domain') != domain or keySearch.group('domain') != domain:
         print('failed to parse key file for ' + domain + ' file: ' + k.as_posix())
         return
-      if meta['Publish'] >= ts and not ('Delete' in meta and meta['Delete'] > ts):
+      if meta['Publish'] <= ts and not ('Delete' in meta and meta['Delete'] < ts):
         pub.append({
           'keytag'     : int( idSearch.group('id') ),
           'flags'      : int( keySearch.group('flags') ),
@@ -212,6 +212,7 @@ def main():
       if domain in zoneKeyDirs:
         pubKeys = getKeys(u, domain, zoneKeyDirs[domain])
         if not pubKeys:
+          print('No pub keys found for ' + domain)
           continue
         data = json.dumps({ 'dnssec_keys': pubKeys })
         updateHash = hashlib.sha1(str(data).encode('utf-8')).hexdigest()
