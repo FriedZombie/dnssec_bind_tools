@@ -94,7 +94,7 @@ def getKeys(u, domain, dir):
     for k, v in pubFlags:
       pubFlags[k] = int(v)
 
-  regKey = re.compile('^\s*(?P<domain>\S+?)\.\s+IN\s+DNSKEY\s+(?P<flags>\d+)\s+(?P<protocol>\d+)\s+(?P<algorithm>\d+)\s+(?P<key>\S.*\S)\s', flags=re.MULTILINE)
+  regKey = re.compile('^\s*(?P<domain>\S+?)\.\s+(?P<ttl>\d*)\s*IN\s+DNSKEY\s+(?P<flags>\d+)\s+(?P<protocol>\d+)\s+(?P<algorithm>\d+)\s+(?P<key>.+)\s', flags=re.MULTILINE)
   regId = re.compile('^\s*;.*?keyid\s+(?P<id>\d+).+?for\s+(?P<domain>\S+?)\.\s', flags=re.MULTILINE)
 
   for k in p.glob('K' + domain + '*.key'):
